@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sistema Solar 3D - Realidad Virtual</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Arial,sans-serif;color:#fff}
+  canvas{display:block}
+  #ui{position:fixed;top:12px;left:12px;width:310px;max-height:calc(100% - 90px);overflow:auto;box-sizing:border-box;
+      background:rgba(10,15,30,.82);border:1px solid #2c3e66;border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.4;backdrop-filter:blur(6px)}
+  #ui.min #cuerpo{display:none}
+  #cab{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  #ui h1{font-size:16px;margin:0;color:#8fb8ff}
+  #toggle{background:none;border:1px solid #3a5190;color:#fff;border-radius:6px;cursor:pointer;padding:2px 9px;font-size:14px}
+  #ui p{margin:4px 0}
+  #info h2{margin:8px 0 2px;font-size:17px;color:#ffd27a}
+  #ui small{color:#9aa7c4}
+  .datos{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:6px 0;font-size:12.5px}
+  .datos span{color:#9aa7c4}
+  .datos b{font-weight:600}
+  .peso{background:#1a2747;border-radius:8px;padding:6px 8px;margin-top:6px;font-size:13px}
+  .peso b{color:#7dffb0}
+  .fila{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  button.b{background:#1c2a4d;color:#fff;border:1px solid #3a5190;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:13px}
+  button.b:hover{background:#2a3d70}
+  button.b.on{background:#3a5190;border-color:#7da2ff}
+  .planetas button.b{padding:4px 8px;font-size:12px}
+  label.l{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px}
+  input[type=range]{flex:1}
+  input[type=number]{width:60px;background:#0d1530;color:#fff;border:1px solid #3a5190;border-radius:6px;padding:3px 5px}
+  #quiz{display:none;margin-top:8px;background:#2a1a47;border:1px solid #6a4ab0;border-radius:8px;padding:8px}
+  #quiz .pregunta{font-weight:600;color:#e2ccff;margin:2px 0}
+  #quiz .fb{font-size:13px;margin-top:4px}
+  .ok{color:#7dffb0}.mal{color:#ff8a8a}
+  #tip{position:fixed;pointer-events:none;background:rgba(0,0,0,.78);border:1px solid #3a5190;padding:3px 8px;border-radius:6px;
+       font-size:13px;display:none;transform:translate(14px,14px)}
+  #msg{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);padding:6px 12px;border-radius:8px;font-size:13px;display:none}
+  @media (max-width:600px){ #ui{width:auto;right:12px;max-height:46%} }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="cab"><h1>🪐 Sistema Solar en VR</h1><button id="toggle" title="Ocultar / mostrar panel">–</button></div>
+  <div id="cuerpo">
+    <p><small>Arrastra = girar · Rueda o pellizco = zoom · Toca un planeta = viajar a él.<br>
+    Teclas: 0–8 planetas · Espacio pausa · Esc vista general · Q quiz · L nombres · O órbitas.<br>
+    En visor VR: apunta con el control y presiona el gatillo.</small></p>
+    <div id="info"><h2>Toca un planeta</h2><p>Aquí verás sus datos.</p></div>
+    <div id="quiz"></div>
+    <label class="l">⚖️ Tu peso en la Tierra: <input type="number" id="peso" value="60" min="1" max="300"> kg</label>
+    <div class="fila planetas" id="lista"></div>
+    <label class="l">Velocidad <input type="range" id="vel" min="0" max="10" step="0.25" value="1"><span id="velTxt">x1</span></label>
+    <div class="fila">
+      <button class="b" id="pause">⏸ Pausar</button>
+      <button class="b on" id="orbits">Órbitas</button>
+      <button class="b on" id="labels">Nombres</button>
+      <button class="b" id="general">🔭 Vista general</button>
+      <button class="b" id="quizBtn">🎯 Quiz</button>
+    </div>
+  </div>
+</div>
+<div id="tip"></div>
+<div id="msg"></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+const $ = id => document.getElementById(id);
+
+/* ---------- Datos (tamaños y distancias en escala artística; datos reales en el panel) ---------- */
+const PLANETAS = [
+  {n:'Mercurio',r:0.8, d:10, p:4.1,  c:[150,140,130], g:3.7,  diam:'4 879 km',   dist:'58 millones km',    dia:'59 días',    anio:'88 días',   lunas:'0',          temp:'-173 a 427 °C',
+   info:'El más cercano al Sol. Un año dura 88 días terrestres.'},
+  {n:'Venus',   r:1.4, d:14, p:1.6,  c:[225,190,120], g:8.87, diam:'12 104 km',  dist:'108 millones km',   dia:'243 días',   anio:'225 días',  lunas:'0',          temp:'~465 °C',
+   info:'El más caliente por su efecto invernadero. Gira al revés: su día es más largo que su año.'},
+  {n:'Tierra',  r:1.5, d:19, p:1.0,  c:[60,110,200],  g:9.81, diam:'12 742 km',  dist:'150 millones km',   dia:'24 horas',   anio:'365 días',  lunas:'1',          temp:'~15 °C (media)',
+   info:'Nuestro hogar. Único planeta con vida conocida.', luna:true},
+  {n:'Marte',   r:1.1, d:24, p:0.53, c:[200,90,50],   g:3.71, diam:'6 779 km',   dist:'228 millones km',   dia:'24,6 horas', anio:'687 días',  lunas:'2',          temp:'~-65 °C (media)',
+   info:'El planeta rojo. Tiene el volcán más alto conocido: el Monte Olimpo.'},
+  {n:'Júpiter', r:4.2, d:34, p:0.084,c:[205,160,120], g:24.79,diam:'139 820 km', dist:'778 millones km',   dia:'9,9 horas',  anio:'11,9 años', lunas:'más de 90',  temp:'~-110 °C',
+   info:'El más grande. Su Gran Mancha Roja es una tormenta que dura siglos.', bandas:true},
+  {n:'Saturno', r:3.6, d:45, p:0.034,c:[225,200,150], g:10.44,diam:'116 460 km', dist:'1 434 millones km', dia:'10,7 horas', anio:'29,5 años', lunas:'más de 270', temp:'~-140 °C',
+   info:'Famoso por sus anillos de hielo y roca. Es tan poco denso que flotaría en agua.', bandas:true, anillo:true},
+  {n:'Urano',   r:2.4, d:55, p:0.012,c:[140,215,225], g:8.69, diam:'50 724 km',  dist:'2 871 millones km', dia:'17,2 horas', anio:'84 años',   lunas:'28',         temp:'~-195 °C',
+   info:'Gira "acostado": su eje está inclinado unos 98°.'},
+  {n:'Neptuno', r:2.3, d:64, p:0.006,c:[60,90,210],   g:11.15,diam:'49 244 km',  dist:'4 495 millones km', dia:'16,1 horas', anio:'165 años',  lunas:'16',         temp:'~-200 °C',
+   info:'El más lejano y ventoso: vientos de más de 2000 km/h.'}
+];
+const DATOS_SOL  = {n:'Sol', g:274, diam:'1 392 700 km', dist:'—', dia:'~27 días', anio:'—', lunas:'—', temp:'~5500 °C (superficie)',
+  info:'Una estrella: contiene el 99,8 % de la masa del sistema solar.'};
+const DATOS_LUNA = {n:'Luna', g:1.62, diam:'3 474 km', dist:'384 400 km de la Tierra', dia:'27,3 días', anio:'—', lunas:'—', temp:'-173 a 127 °C',
+  info:'Satélite natural de la Tierra. Su gravedad causa las mareas.'};
+
+/* ---------- Escena base ---------- */
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x02030a);
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 2000);
+const CAM_INICIO = new THREE.Vector3(0,45,85);
+camera.position.copy(CAM_INICIO);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.minDistance = 2; controls.maxDistance = 300;
+
+const sistema = new THREE.Group();
+scene.add(sistema);
+scene.add(new THREE.AmbientLight(0x404060, 0.6));
+sistema.add(new THREE.PointLight(0xfff2cc, 3.2, 0, 0.6));
+
+/* ---------- Estrellas de fondo ---------- */
+{
+  const g = new THREE.BufferGeometry(), N = 2500, pos = new Float32Array(N*3);
+  for(let i=0;i<N;i++){
+    const r = 600 + Math.random()*300, t = Math.random()*Math.PI*2, f = Math.acos(2*Math.random()-1);
+    pos.set([r*Math.sin(f)*Math.cos(t), r*Math.cos(f), r*Math.sin(f)*Math.sin(t)], i*3);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({color:0xffffff,size:1.4,sizeAttenuation:false})));
+}
+
+/* ---------- Texturas procedurales ---------- */
+function textura(rgb, bandas){
+  const c = document.createElement('canvas'); c.width=512; c.height=256;
+  const x = c.getContext('2d');
+  x.fillStyle = `rgb(${rgb})`; x.fillRect(0,0,512,256);
+  for(let i=0;i<(bandas?40:900);i++){
+    const v = (Math.random()-.5)*(bandas?50:60);
+    x.fillStyle = `rgba(${rgb.map(k=>Math.max(0,Math.min(255,k+v))).join(',')},.35)`;
+    if(bandas) x.fillRect(0, Math.random()*256, 512, 2+Math.random()*10);
+    else { x.beginPath(); x.arc(Math.random()*512,Math.random()*256,2+Math.random()*14,0,7); x.fill(); }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+/* ---------- Etiquetas flotantes con el nombre ---------- */
+const etiquetas = [];
+function etiqueta(texto, alto, escala=1){
+  const c = document.createElement('canvas'); c.width=256; c.height=64;
+  const x = c.getContext('2d');
+  x.font='bold 34px system-ui'; x.textAlign='center'; x.textBaseline='middle';
+  x.lineWidth=6; x.strokeStyle='rgba(0,0,0,.85)'; x.strokeText(texto,128,32);
+  x.fillStyle='#fff'; x.fillText(texto,128,32);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false}));
+  s.scale.set(6*escala,1.5*escala,1); s.position.y = alto;
+  etiquetas.push(s); return s;
+}
+
+/* ---------- Sol ---------- */
+const sol = new THREE.Mesh(new THREE.SphereGeometry(6,48,48),
+  new THREE.MeshBasicMaterial({map:textura([255,190,60],true)}));
+sol.userData = DATOS_SOL;
+sol.add(etiqueta('Sol', 8.4, 1.3));
+sistema.add(sol);
+sistema.add(new THREE.Mesh(new THREE.SphereGeometry(7.4,32,32),
+  new THREE.MeshBasicMaterial({color:0xffaa33,transparent:true,opacity:.18,side:THREE.BackSide})));
+
+/* ---------- Planetas ---------- */
+const cuerpos = [sol];          // todo lo que se puede tocar
+const principales = [sol];      // Sol + 8 planetas (para teclas 0–8)
+const orbitaLineas = [];
+const pivotes = [];
+let lunaMesh = null;
+
+PLANETAS.forEach(p=>{
+  const pivote = new THREE.Object3D();
+  pivote.rotation.y = Math.random()*Math.PI*2;
+  sistema.add(pivote);
+
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.r,40,40),
+    new THREE.MeshStandardMaterial({map:textura(p.c,p.bandas),roughness:.9}));
+  mesh.position.x = p.d;
+  mesh.userData = p;
+  mesh.add(etiqueta(p.n, p.r+1.3));
+  pivote.add(mesh);
+  cuerpos.push(mesh); principales.push(mesh);
+  pivotes.push({pivote,mesh,p});
+
+  if(p.anillo){
+    const ring = new THREE.Mesh(new THREE.RingGeometry(p.r*1.4,p.r*2.3,96),
+      new THREE.MeshBasicMaterial({color:0xcdb88a,side:THREE.DoubleSide,transparent:true,opacity:.7}));
+    ring.rotation.x = Math.PI/2.4; mesh.add(ring);
+  }
+  if(p.luna){
+    const lp = new THREE.Object3D(); mesh.add(lp);
+    lunaMesh = new THREE.Mesh(new THREE.SphereGeometry(.4,24,24),
+      new THREE.MeshStandardMaterial({map:textura([170,170,170]),roughness:1}));
+    lunaMesh.position.x = 2.6; lp.add(lunaMesh);
+    lunaMesh.userData = DATOS_LUNA;
+    lunaMesh.add(etiqueta('Luna', 1, .5));
+    cuerpos.push(lunaMesh);
+    mesh.userData.lunaPivote = lp;
+  }
+
+  const o = new THREE.Mesh(new THREE.RingGeometry(p.d-.04,p.d+.04,160),
+    new THREE.MeshBasicMaterial({color:0x4a6aa8,side:THREE.DoubleSide,transparent:true,opacity:.45}));
+  o.rotation.x = Math.PI/2; sistema.add(o); orbitaLineas.push(o);
+});
+
+/* ---------- Cinturón de asteroides (entre Marte y Júpiter) ---------- */
+const cinturon = (()=>{
+  const N=1800, pos=new Float32Array(N*3), g=new THREE.BufferGeometry();
+  for(let i=0;i<N;i++){
+    const a=Math.random()*Math.PI*2, r=26+Math.random()*3;
+    pos.set([Math.cos(a)*r,(Math.random()-.5)*.8,Math.sin(a)*r], i*3);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const pts = new THREE.Points(g, new THREE.PointsMaterial({color:0x9a8f80,size:.25}));
+  sistema.add(pts); return pts;
+})();
+
+/* ---------- Anillo que marca el cuerpo seleccionado ---------- */
+const marca = new THREE.Mesh(new THREE.RingGeometry(1,1.12,64),
+  new THREE.MeshBasicMaterial({color:0x7dd3ff,transparent:true,opacity:.85,side:THREE.DoubleSide,depthTest:false}));
+marca.visible = false; scene.add(marca);
+
+/* ---------- Panel dentro de VR ---------- */
+const panelCanvas = document.createElement('canvas'); panelCanvas.width=768; panelCanvas.height=320;
+const panelTex = new THREE.CanvasTexture(panelCanvas);
+const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.2,.5),
+  new THREE.MeshBasicMaterial({map:panelTex,transparent:true}));
+panel.visible = false; scene.add(panel);
+
+function ajustarTexto(x,t,xx,yy,w,lh){
+  let linea='',y=yy;
+  for(const palabra of t.split(' ')){
+    const prueba = linea+palabra+' ';
+    if(x.measureText(prueba).width>w){ x.fillText(linea,xx,y); linea=palabra+' '; y+=lh; }
+    else linea=prueba;
+  }
+  x.fillText(linea,xx,y);
+}
+function dibujarPanel(titulo, texto){
+  const x = panelCanvas.getContext('2d');
+  x.clearRect(0,0,768,320);
+  x.fillStyle='rgba(10,15,30,.88)'; x.fillRect(0,0,768,320);
+  x.strokeStyle='#3a5190'; x.lineWidth=6; x.strokeRect(3,3,762,314);
+  x.fillStyle='#ffd27a'; x.font='bold 50px system-ui'; x.fillText(titulo,30,70);
+  x.fillStyle='#fff'; x.font='30px system-ui'; ajustarTexto(x,texto,30,125,710,40);
+  panelTex.needsUpdate = true;
+}
+
+/* ---------- Ficha de datos + calculadora de peso ---------- */
+let peso = 60;
+function htmlInfo(d){
+  const filas = [['Diámetro',d.diam],['Distancia',d.dist],['Día',d.dia],['Año',d.anio],
+                 ['Lunas',d.lunas],['Temperatura',d.temp],['Gravedad',d.g+' m/s²']];
+  const kg = Math.round(peso*d.g/9.81*10)/10;
+  return `<h2>${d.n}</h2><p>${d.info}</p>
+    <div class="datos">${filas.map(([k,v])=>`<span>${k}</span><b>${v}</b>`).join('')}</div>
+    <div class="peso">⚖️ Si en la Tierra pesas ${peso} kg, aquí pesarías como <b>${kg} kg</b></div>`;
+}
+
+/* ---------- Quiz ---------- */
+const PREGUNTAS = [
+  {q:'¿Cuál es el planeta más grande?', a:'Júpiter'},
+  {q:'¿Cuál es el planeta más caliente?', a:'Venus'},
+  {q:'¿Qué planeta tiene el volcán más alto?', a:'Marte'},
+  {q:'¿Qué planeta gira "acostado"?', a:'Urano'},
+  {q:'¿Cuál es el planeta más cercano al Sol?', a:'Mercurio'},
+  {q:'¿Qué planeta tiene los anillos más famosos?', a:'Saturno'},
+  {q:'¿Qué planeta tiene los vientos más fuertes?', a:'Neptuno'},
+  {q:'¿Qué cuerpo causa las mareas en la Tierra?', a:'Luna'},
+  {q:'¿Qué estrella está en el centro del sistema?', a:'Sol'},
+  {q:'¿En qué planeta vives?', a:'Tierra'}
+];
+let quiz=false, pregs=[], qi=0, puntos=0, fallos=0;
+function nuevaRonda(){ pregs=[...PREGUNTAS].sort(()=>Math.random()-.5); qi=0; puntos=0; fallos=0; mostrarPregunta(''); }
+function mostrarPregunta(fb){
+  const q = $('quiz');
+  if(qi>=pregs.length){
+    q.innerHTML = `${fb?`<div class="fb">${fb}</div>`:''}<div class="pregunta">🏆 ¡Terminaste! ${puntos}/${pregs.length} correctas</div>
+      <div class="fila"><button class="b" id="otra">Jugar otra vez</button></div>`;
+    $('otra').onclick = nuevaRonda; return;
+  }
+  q.innerHTML = `<small>Pregunta ${qi+1}/${pregs.length} · Puntos: ${puntos}</small>
+    <div class="pregunta">${pregs[qi].q}</div><div class="fb">${fb||'Toca el cuerpo correcto 👆'}</div>`;
+}
+function responder(nombre){
+  const p = pregs[qi]; let fb, txt;
+  if(nombre===p.a){ puntos++; qi++; fallos=0; fb=`<span class="ok">✅ ¡Correcto! Era ${p.a}.</span>`; txt=`¡Correcto! Era ${p.a}.`; }
+  else if(++fallos>=2){ qi++; fallos=0; fb=`<span class="mal">❌ Era ${p.a}. ¡Sigue con la próxima!</span>`; txt=`No. La respuesta era ${p.a}.`; }
+  else { fb=`<span class="mal">❌ Ese es ${nombre}. Intenta otra vez.</span>`; txt=`Ese es ${nombre}. Intenta otra vez: ${p.q}`; return txt; }
+  mostrarPregunta(fb);
+  return txt + (qi<pregs.length ? ` Siguiente: ${pregs[qi].q}` : ` ¡Fin! ${puntos}/${pregs.length} puntos.`);
+}
+
+/* ---------- Selección y viaje de cámara ---------- */
+const ray = new THREE.Raycaster();
+let seleccion=null, seguir=null, volando=0, aCasa=0;
+const ultimo=new THREE.Vector3(), destino=new THREE.Vector3(), delta=new THREE.Vector3(), v=new THREE.Vector3(), v2=new THREE.Vector3();
+
+function elegir(obj){
+  seleccion = obj; marca.visible = true;
+  seguir = obj; volando = 1.6; aCasa = 0; obj.getWorldPosition(ultimo);
+  const d = obj.userData;
+  let textoVR = d.info;
+  if(quiz && qi<pregs.length) textoVR = responder(d.n);
+  $('info').innerHTML = htmlInfo(d);
+  dibujarPanel(d.n, textoVR);
+  panel.visible = renderer.xr.isPresenting;
+  document.querySelectorAll('#lista button').forEach(b=>b.classList.toggle('on', b.dataset.n===d.n));
+}
+function vistaGeneral(){ seguir=null; volando=0; aCasa=1.6; }
+
+function tocar(e){
+  const m = new THREE.Vector2(e.clientX/innerWidth*2-1, -(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(m,camera);
+  return ray.intersectObjects(cuerpos,false)[0];
+}
+let downPos=null;
+renderer.domElement.addEventListener('pointerdown',e=>{downPos=[e.clientX,e.clientY];});
+renderer.domElement.addEventListener('pointerup',e=>{
+  if(!downPos||Math.hypot(e.clientX-downPos[0],e.clientY-downPos[1])>5) return;
+  const h = tocar(e); if(h) elegir(h.object);
+});
+/* Nombre al pasar el ratón */
+const tip = $('tip');
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(e.pointerType!=='mouse') return;
+  const h = tocar(e);
+  if(h){ tip.style.display='block'; tip.textContent=h.object.userData.n; tip.style.left=e.clientX+'px'; tip.style.top=e.clientY+'px'; renderer.domElement.style.cursor='pointer'; }
+  else { tip.style.display='none'; renderer.domElement.style.cursor=''; }
+});
+renderer.domElement.addEventListener('pointerleave',()=>tip.style.display='none');
+
+/* Controles VR: láser + gatillo */
+const tmpM = new THREE.Matrix4();
+for(let i=0;i<2;i++){
+  const ctrl = renderer.xr.getController(i);
+  ctrl.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3(0,0,-3)]),
+    new THREE.LineBasicMaterial({color:0x66aaff})));
+  ctrl.addEventListener('selectstart',()=>{
+    tmpM.identity().extractRotation(ctrl.matrixWorld);
+    ray.set(new THREE.Vector3().setFromMatrixPosition(ctrl.matrixWorld), new THREE.Vector3(0,0,-1).applyMatrix4(tmpM));
+    const h = ray.intersectObjects(cuerpos,false)[0];
+    if(h) elegir(h.object);
+  });
+  scene.add(ctrl);
+}
+
+/* ---------- Interfaz ---------- */
+let pausa=false, vel=1, mostrarOrb=true, mostrarNom=true;
+[...principales, lunaMesh].forEach((m,i)=>{
+  const b = document.createElement('button');
+  b.className='b'; b.dataset.n=m.userData.n;
+  b.textContent = (m===lunaMesh?'':i+' ') + m.userData.n;
+  b.onclick = ()=>elegir(m);
+  $('lista').appendChild(b);
+});
+$('pause').onclick = ()=>{ pausa=!pausa; $('pause').textContent = pausa?'▶ Reanudar':'⏸ Pausar'; };
+$('vel').oninput = e=>{ vel=parseFloat(e.target.value); $('velTxt').textContent='x'+vel; };
+$('orbits').onclick = ()=>{ mostrarOrb=!mostrarOrb; orbitaLineas.forEach(o=>o.visible=mostrarOrb); $('orbits').classList.toggle('on',mostrarOrb); };
+$('labels').onclick = ()=>{ mostrarNom=!mostrarNom; etiquetas.forEach(s=>s.visible=mostrarNom); $('labels').classList.toggle('on',mostrarNom); };
+$('general').onclick = vistaGeneral;
+$('quizBtn').onclick = ()=>{
+  quiz=!quiz; $('quizBtn').classList.toggle('on',quiz);
+  $('quiz').style.display = quiz?'block':'none';
+  if(quiz) nuevaRonda();
+};
+$('peso').oninput = e=>{
+  const n = parseFloat(e.target.value); if(n>0){ peso=n; if(seleccion) $('info').innerHTML = htmlInfo(seleccion.userData); }
+};
+$('toggle').onclick = ()=>{ const u=$('ui'); u.classList.toggle('min'); $('toggle').textContent = u.classList.contains('min')?'+':'–'; };
+
+addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT') return;
+  const k = e.key.toLowerCase();
+  if(k===' '){ e.preventDefault(); $('pause').click(); }
+  else if(k>='0' && k<='8') elegir(principales[+k]);
+  else if(k==='escape') vistaGeneral();
+  else if(k==='q') $('quizBtn').click();
+  else if(k==='l') $('labels').click();
+  else if(k==='o') $('orbits').click();
+});
+
+/* ---------- Entrar / salir de VR ---------- */
+renderer.xr.addEventListener('sessionstart',()=>{
+  sistema.scale.setScalar(0.035);
+  sistema.position.set(0,1.1,-1.6);
+  cinturon.material.size = .25*0.035;
+  seguir=null; volando=0; aCasa=0;
+  $('ui').style.display='none';
+  if(seleccion) panel.visible = true;
+});
+renderer.xr.addEventListener('sessionend',()=>{
+  sistema.scale.setScalar(1); sistema.position.set(0,0,0);
+  cinturon.material.size = .25;
+  $('ui').style.display='block'; panel.visible=false;
+  vistaGeneral();
+});
+
+/* Si el usuario mueve la cámara, se cancela el viaje automático (pero sigue al planeta) */
+controls.addEventListener('start',()=>{ volando=0; aCasa=0; });
+
+/* ---------- Bucle de animación ---------- */
+const clock = new THREE.Clock();
+let tiempo = 0;
+renderer.setAnimationLoop(()=>{
+  const dt = Math.min(clock.getDelta(), .1);
+  tiempo += dt;
+  if(!pausa){
+    sol.rotation.y += dt*0.1*vel;
+    cinturon.rotation.y += dt*0.03*vel;
+    pivotes.forEach(({pivote,mesh,p})=>{
+      pivote.rotation.y += dt*p.p*0.6*vel;
+      mesh.rotation.y   += dt*0.8*vel;
+      if(mesh.userData.lunaPivote) mesh.userData.lunaPivote.rotation.y += dt*3*vel;
+    });
+  }
+
+  const camActiva = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  if(seleccion){
+    seleccion.getWorldPosition(v2);
+    marca.position.copy(v2);
+    const rad = seleccion.geometry.parameters.radius * sistema.scale.x;
+    marca.scale.setScalar(rad*1.5*(1+0.08*Math.sin(tiempo*4)));
+    marca.lookAt(v.setFromMatrixPosition(camActiva.matrixWorld));
+  }
+
+  if(renderer.xr.isPresenting){
+    panel.position.set(0,1.85,-1.3); panel.lookAt(0,1.6,0);
+  } else {
+    if(seguir){
+      seguir.getWorldPosition(v);
+      delta.subVectors(v,ultimo); camera.position.add(delta); controls.target.add(delta); ultimo.copy(v);
+      if(volando>0){
+        volando -= dt;
+        const r = seguir.geometry.parameters.radius;
+        destino.set(v.x, v.y + r*1.8+1, v.z + r*5+3);
+        camera.position.lerp(destino,.07); controls.target.lerp(v,.15);
+      }
+    } else if(aCasa>0){
+      aCasa -= dt;
+      camera.position.lerp(CAM_INICIO,.06); controls.target.lerp(v.set(0,0,0),.1);
+    }
+    controls.update();
+  }
+  renderer.render(scene,camera);
+});
+
+addEventListener('resize',()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+if(navigator.xr){
+  navigator.xr.isSessionSupported('immersive-vr').then(ok=>{
+    if(!ok){ const m=$('msg'); m.style.display='block';
+      m.textContent='Sin visor VR detectado: puedes explorar en modo 3D normal.';
+      setTimeout(()=>m.style.display='none',6000); }
+  });
+}
+</script>
+</body>
+</html>
